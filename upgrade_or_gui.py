@@ -550,7 +550,7 @@ class MatrixWebDeployerWindow(QMainWindow):
 
     def _build_action_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self.deploy_btn = self._make_button("Build & Deploy", "primary")
+        self.deploy_btn = self._make_button("Build && Deploy", "primary")
         self.deploy_btn.setStyleSheet(
             _button_style(BTN_COLORS["primary"]) + "QPushButton { font-size:15px; padding:11px; }"
         )
