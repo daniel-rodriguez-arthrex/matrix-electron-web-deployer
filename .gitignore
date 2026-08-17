@@ -1,0 +1,31 @@
+# Secrets - never commit
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.spec
+build_exe.log
+
+# Downloaded/extracted binary artifacts (large, environment-specific)
+swu-extracted/
+web-downloaded/
+web-assets/
+*.asar
+
+# Run logs / working data
+work/
+*.log
+diag_output.txt
+index_dump.txt
+
+# OS files
+Thumbs.db
+.DS_Store
