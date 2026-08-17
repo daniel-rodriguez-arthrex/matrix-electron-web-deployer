@@ -1,12 +1,12 @@
-# Matrix Electron Web App Deplyoment Tool
+# Matrix Electron Web App Deployment Tool
 
 Tooling to deploy the Matrix OR (Operating Room) web assets and backend API to Arthrex OR appliances over SSH.
 
 ## Setup
 
 ```powershell
-git clone https://github.com/daniel-rodriguez-arthrex/or-refresh-automation.git
-cd or-refresh-automation
+git clone https://github.com/daniel-rodriguez-arthrex/Matrix-Electron-Web-App-Deployment-Tool.git
+cd Matrix-Electron-Web-App-Deployment-Tool
 pip install -r requirements.txt
 copy .env.example .env
 # Edit .env and fill in ROUTER_IP, SSH_USERNAME, SSH_PASSWORD, SUDO_PASSWORD
