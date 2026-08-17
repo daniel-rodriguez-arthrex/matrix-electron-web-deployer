@@ -14,12 +14,6 @@ dist/
 *.spec
 build_exe.log
 
-# Downloaded/extracted binary artifacts (large, environment-specific)
-swu-extracted/
-web-downloaded/
-web-assets/
-*.asar
-
 # Run logs / working data
 work/
 *.log
