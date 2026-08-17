@@ -1,5 +1,5 @@
-# Build the Matrix OR Configuration Tool as a one-file executable
-# Run from the or-refresh-automation directory
+# Build the Matrix Electron Web Deployer as a one-file executable
+# Run from the project directory
 
 $ErrorActionPreference = "Stop"
 
@@ -9,7 +9,7 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
     Copy-Item ".env.example" ".env"
 }
 
-$ExeName = "Matrix OR Config Tool.exe"
+$ExeName = "Matrix Electron Web Deployer.exe"
 $DistDir = "$PSScriptRoot"
 
 Write-Host "Building executable..."
@@ -27,7 +27,7 @@ python -m PyInstaller `
     --noconfirm `
     --clean `
     --windowed `
-    --name "Matrix OR Config Tool" `
+    --name "Matrix Electron Web Deployer" `
     --distpath "$DistDir" `
     --workpath "$PSScriptRoot\build" `
     --specpath "$PSScriptRoot" `
@@ -49,10 +49,10 @@ if (Test-Path $ExePath) {
 # Create desktop shortcut
 $WshShell = New-Object -ComObject WScript.Shell
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
-$Shortcut = $WshShell.CreateShortcut("$DesktopPath\Matrix OR Config Tool.lnk")
+$Shortcut = $WshShell.CreateShortcut("$DesktopPath\Matrix Electron Web Deployer.lnk")
 $Shortcut.TargetPath = $ExePath
 $Shortcut.WorkingDirectory = $PSScriptRoot
 $Shortcut.IconLocation = $ExePath
 $Shortcut.Save()
 
-Write-Host "Desktop shortcut created: $DesktopPath\Matrix OR Config Tool.lnk"
+Write-Host "Desktop shortcut created: $DesktopPath\Matrix Electron Web Deployer.lnk"

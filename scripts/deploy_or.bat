@@ -8,22 +8,35 @@ if "%1"=="" (
 )
 
 echo ========================================
-echo Step 1: Pulling latest matrix-api code
+echo Step 1: Building matrix-api backend
 echo ========================================
-cd ..\matrix-api-linux
+cd ..\repos\matrix-api-linux
 git pull
 if errorlevel 1 (
-    echo ERROR: Git pull failed
+    echo ERROR: Git pull failed ^(backend^)
+    exit /b 1
+)
+call npm install
+call npm run build
+if errorlevel 1 (
+    echo ERROR: Backend build failed
     exit /b 1
 )
 
 echo.
 echo ========================================
-echo Step 2: Building matrix-api dist
+echo Step 2: Building matrix-app web assets
 echo ========================================
+cd ..\matrix-app-linux
+git pull
+if errorlevel 1 (
+    echo ERROR: Git pull failed ^(web^)
+    exit /b 1
+)
+call npm install
 call npm run build
 if errorlevel 1 (
-    echo ERROR: Build failed
+    echo ERROR: Web build failed
     exit /b 1
 )
 
@@ -31,7 +44,7 @@ echo.
 echo ========================================
 echo Step 3: Deploying to OR%1
 echo ========================================
-cd ..\or-refresh-automation
+cd ..\..\or-refresh-automation
 python upgrade_or.py --rooms %1
 if errorlevel 1 (
     echo ERROR: Deployment failed
