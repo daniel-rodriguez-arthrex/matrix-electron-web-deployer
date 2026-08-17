@@ -42,7 +42,7 @@ python upgrade_or_gui.py
 A PyQt5 app that shares its look with the Matrix Deploy tool. Three tabs:
 
 - **Deploy** — tick the **Target ORs** (Select All / Clear All), then click **Build & Deploy**. It builds backend + web from source, runs a version-compatibility check, deploys to every selected OR, and restarts the `matrix-api` service — all streamed to the live console. **Build Only** validates the source compiles without deploying; **Cancel** stops after the current step/room.
-- **Settings** — connection fields (Router IP, SSH user/password, sudo password), prefilled from `.env` with show/hide toggles and a **Reload from .env** button.
+- **Settings** — connection fields (Router IP, SSH user/password, sudo password) plus editable **Source Repositories** paths (backend + web app, with Browse). All prefilled from `.env` (`BACKEND_REPO`/`WEB_REPO` optional; defaults to `../repos/*`). A live readiness banner turns green only when connection and repo paths are valid, and Build/Deploy is blocked with a clear message until they are.
 - **FAQ** — searchable answers to common workflow questions and troubleshooting.
 
 ## CLI

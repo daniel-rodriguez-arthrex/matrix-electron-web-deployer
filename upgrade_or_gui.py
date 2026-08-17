@@ -23,12 +23,15 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap, QPolygon, QTextCursor
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -48,6 +51,9 @@ from upgrade_or import (
     deploy_or,
     load_env_file,
 )
+
+DEFAULT_BACKEND_REPO = BASE_DIR.parent / "repos" / "matrix-api-linux"
+DEFAULT_WEB_REPO = BASE_DIR.parent / "repos" / "matrix-app-linux"
 
 # ---------------------------------------------------------------------------
 # Shared design language (mirrors Matrix Deploy)
@@ -281,16 +287,16 @@ class BuildDeployWorker(QThread):
     status = pyqtSignal(str)
     done = pyqtSignal(bool)             # overall success
 
-    def __init__(self, deploy_after: bool, rooms: List[int], config: Optional[RuntimeConfig]):
+    def __init__(self, deploy_after: bool, rooms: List[int], config: Optional[RuntimeConfig],
+                 backend_repo: Path, web_app_dir: Path):
         super().__init__()
         self.deploy_after = deploy_after
         self.rooms = rooms
         self.config = config
         self._cancel = False
 
-        project_root = BASE_DIR.parent
-        self.backend_repo = project_root / "repos" / "matrix-api-linux"
-        self.web_app_dir = project_root / "repos" / "matrix-app-linux"
+        self.backend_repo = Path(backend_repo)
+        self.web_app_dir = Path(web_app_dir)
         self.backend_dist = self.backend_repo / "dist"
         self.web_dist = self.web_app_dir / "dist" / "arthrex-synergy-matrix"
 
@@ -445,6 +451,8 @@ class MatrixWebDeployerWindow(QMainWindow):
         self._build_ui()
         self._load_env()
         self._update_status_bar()
+        self._refresh_config_status()
+        self._warn_if_unconfigured()
 
     # -- UI ----------------------------------------------------------------
     def _build_ui(self):
@@ -466,6 +474,7 @@ class MatrixWebDeployerWindow(QMainWindow):
         outer.setContentsMargins(8, 10, 8, 8)
         outer.setSpacing(12)
 
+        outer.addWidget(self._build_deploy_header())
         outer.addWidget(self._build_rooms_group())
         outer.addLayout(self._build_action_row())
 
@@ -477,6 +486,40 @@ class MatrixWebDeployerWindow(QMainWindow):
         self.console = _make_console()
         outer.addWidget(self.console, stretch=1)
         return tab
+
+    def _build_deploy_header(self) -> QWidget:
+        """Title + subtitle and a compact 'at a glance' 3-step workflow."""
+        header = QFrame()
+        header.setStyleSheet(
+            "QFrame { background:#FFFFFF; border:1px solid #CFD8DC; border-radius:8px; }"
+        )
+        lay = QVBoxLayout(header)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(4)
+
+        title = QLabel("Matrix Electron Web Deployer")
+        title.setStyleSheet("font-size:20px; font-weight:800; color:#1565C0; border:none;")
+        lay.addWidget(title)
+
+        subtitle = QLabel("Build the Matrix web app + backend API from source and deploy them to the selected ORs.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color:#546E7A; font-size:12px; border:none;")
+        lay.addWidget(subtitle)
+
+        steps = QLabel(
+            "<table cellspacing='0' cellpadding='0' style='margin-top:6px;'><tr>"
+            "<td style='color:#1565C0; font-weight:700;'>1&nbsp;</td>"
+            "<td style='color:#37474F;'>Set connection &amp; repo paths in <b>Settings</b>&nbsp;&nbsp;&rarr;&nbsp;&nbsp;</td>"
+            "<td style='color:#1565C0; font-weight:700;'>2&nbsp;</td>"
+            "<td style='color:#37474F;'>Pick <b>Target ORs</b> below&nbsp;&nbsp;&rarr;&nbsp;&nbsp;</td>"
+            "<td style='color:#1565C0; font-weight:700;'>3&nbsp;</td>"
+            "<td style='color:#37474F;'>Click <b>Build &amp; Deploy</b> and watch the log</td>"
+            "</tr></table>"
+        )
+        steps.setTextFormat(Qt.RichText)
+        steps.setStyleSheet("border:none;")
+        lay.addWidget(steps)
+        return header
 
     def _build_rooms_group(self) -> QGroupBox:
         group = QGroupBox("Target Operating Rooms")
@@ -536,6 +579,14 @@ class MatrixWebDeployerWindow(QMainWindow):
         outer.setContentsMargins(8, 10, 8, 8)
         outer.setSpacing(12)
 
+        # Live readiness banner (red until required fields + repo paths are valid).
+        self.config_status_label = QLabel()
+        self.config_status_label.setWordWrap(True)
+        self.config_status_label.setStyleSheet(
+            "padding:10px 12px; border-radius:6px; font-weight:600;"
+        )
+        outer.addWidget(self.config_status_label)
+
         group = QGroupBox("Connection Settings")
         layout = QGridLayout()
         layout.setHorizontalSpacing(10)
@@ -566,10 +617,36 @@ class MatrixWebDeployerWindow(QMainWindow):
         group.setLayout(layout)
         outer.addWidget(group)
 
+        # Source repositories: build inputs. Editable + Browse, validated below.
+        repo_group = QGroupBox("Source Repositories")
+        repo_layout = QGridLayout()
+        repo_layout.setHorizontalSpacing(10)
+        repo_layout.setVerticalSpacing(8)
+        repo_layout.setColumnStretch(1, 1)
+
+        repo_layout.addWidget(QLabel("Backend repo (matrix-api-linux):"), 0, 0)
+        self.backend_repo_input = QLineEdit()
+        self.backend_repo_input.setPlaceholderText(str(DEFAULT_BACKEND_REPO))
+        repo_layout.addWidget(self.backend_repo_input, 0, 1)
+        b_browse = self._make_button("Browse...", "utility")
+        b_browse.clicked.connect(lambda: self._browse_repo(self.backend_repo_input))
+        repo_layout.addWidget(b_browse, 0, 2)
+
+        repo_layout.addWidget(QLabel("Web app repo (matrix-app-linux):"), 1, 0)
+        self.web_repo_input = QLineEdit()
+        self.web_repo_input.setPlaceholderText(str(DEFAULT_WEB_REPO))
+        repo_layout.addWidget(self.web_repo_input, 1, 1)
+        w_browse = self._make_button("Browse...", "utility")
+        w_browse.clicked.connect(lambda: self._browse_repo(self.web_repo_input))
+        repo_layout.addWidget(w_browse, 1, 2)
+        repo_group.setLayout(repo_layout)
+        outer.addWidget(repo_group)
+
         note = QLabel(
             "Prefilled from a gitignored .env file when present (ROUTER_IP, "
-            "SSH_USERNAME, SSH_PASSWORD, SUDO_PASSWORD). Secrets are never "
-            "written back to disk by this tool."
+            "SSH_USERNAME, SSH_PASSWORD, SUDO_PASSWORD, BACKEND_REPO, WEB_REPO). "
+            "Repo paths must point to clones of the backend and web source. "
+            "Secrets are never written back to disk by this tool."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#607D8B; font-size:12px;")
@@ -581,6 +658,13 @@ class MatrixWebDeployerWindow(QMainWindow):
         reload_btn.clicked.connect(self._load_env)
         reload_row.addWidget(reload_btn)
         outer.addLayout(reload_row)
+
+        # Live-refresh the readiness banner as critical fields change.
+        for widget in (
+            self.router_ip_input, self.username_input, self.password_input,
+            self.sudo_password_input, self.backend_repo_input, self.web_repo_input,
+        ):
+            widget.textChanged.connect(self._refresh_config_status)
 
         outer.addStretch()
         return tab
@@ -717,6 +801,87 @@ class MatrixWebDeployerWindow(QMainWindow):
         self.username_input.setText(env.get("SSH_USERNAME", ""))
         self.password_input.setText(env.get("SSH_PASSWORD", ""))
         self.sudo_password_input.setText(env.get("SUDO_PASSWORD", ""))
+        self.backend_repo_input.setText(env.get("BACKEND_REPO", str(DEFAULT_BACKEND_REPO)))
+        self.web_repo_input.setText(env.get("WEB_REPO", str(DEFAULT_WEB_REPO)))
+        self._refresh_config_status()
+
+    def _browse_repo(self, line_edit: QLineEdit):
+        start = line_edit.text().strip() or str(BASE_DIR.parent / "repos")
+        path = QFileDialog.getExistingDirectory(self, "Select Repository Folder", start)
+        if path:
+            line_edit.setText(path)
+
+    def _backend_repo_path(self) -> Path:
+        text = self.backend_repo_input.text().strip()
+        return Path(text) if text else DEFAULT_BACKEND_REPO
+
+    def _web_repo_path(self) -> Path:
+        text = self.web_repo_input.text().strip()
+        return Path(text) if text else DEFAULT_WEB_REPO
+
+    # -- validation --------------------------------------------------------
+    def _missing_connection(self) -> List[str]:
+        missing = []
+        if not self.router_ip_input.text().strip():
+            missing.append("Router IP")
+        if not self.username_input.text().strip():
+            missing.append("SSH Username")
+        if not self.password_input.text():
+            missing.append("SSH Password")
+        if not self.sudo_password_input.text():
+            missing.append("Sudo Password")
+        return missing
+
+    def _missing_repos(self) -> List[str]:
+        missing = []
+        if not self._backend_repo_path().exists():
+            missing.append("Backend repo (matrix-api-linux)")
+        if not self._web_repo_path().exists():
+            missing.append("Web app repo (matrix-app-linux)")
+        return missing
+
+    def _refresh_config_status(self):
+        label = getattr(self, "config_status_label", None)
+        if label is None:
+            return
+        missing = self._missing_connection() + self._missing_repos()
+        if missing:
+            label.setText("\u26a0  Not ready: fix " + ", ".join(missing) + ".")
+            label.setStyleSheet(
+                "padding:10px 12px; border-radius:6px; font-weight:600;"
+                "background:#FDECEA; color:#C62828; border:1px solid #F5C6CB;"
+            )
+        else:
+            label.setText("\u2713  Ready: connection and repo paths are set.")
+            label.setStyleSheet(
+                "padding:10px 12px; border-radius:6px; font-weight:600;"
+                "background:#E8F5E9; color:#2E7D32; border:1px solid #A5D6A7;"
+            )
+
+    def _warn_if_unconfigured(self):
+        missing = self._missing_connection() + self._missing_repos()
+        if not missing:
+            return
+        self.tabs.setCurrentIndex(1)  # Settings
+
+    def _require_ready(self, need_deploy: bool) -> bool:
+        """Gate for build/deploy. Repo paths are always required (for the
+        build); connection creds are additionally required for deployment.
+        On failure, warns, jumps to Settings, and returns False."""
+        missing = list(self._missing_repos())
+        if need_deploy:
+            missing = self._missing_connection() + missing
+        if not missing:
+            return True
+        self.tabs.setCurrentIndex(1)  # Settings
+        self._refresh_config_status()
+        QMessageBox.warning(
+            self,
+            "Configuration Needed",
+            "Set the following in the Settings tab first:\n\n\u2022 "
+            + "\n\u2022 ".join(missing),
+        )
+        return False
 
     def _set_all_rooms(self, checked: bool):
         for cb in self.room_checkboxes.values():
@@ -738,16 +903,18 @@ class MatrixWebDeployerWindow(QMainWindow):
 
     # -- actions -----------------------------------------------------------
     def _build_only(self):
+        if not self._require_ready(need_deploy=False):
+            return
         self._start(deploy_after=False)
 
     def _build_and_deploy(self):
         rooms = self._selected_rooms()
         if not rooms:
             self._append("No ORs selected. Tick at least one OR on the Deploy tab.", "error")
+            QMessageBox.warning(self, "No ORs Selected",
+                                "Tick at least one OR on the Deploy tab.")
             return
-        if not self.password_input.text() or not self.sudo_password_input.text():
-            self._append("ERROR: SSH Password and Sudo Password are required (Settings tab).", "error")
-            self.tabs.setCurrentIndex(1)
+        if not self._require_ready(need_deploy=True):
             return
         self._start(deploy_after=True, rooms=rooms)
 
@@ -762,7 +929,10 @@ class MatrixWebDeployerWindow(QMainWindow):
         )
         self.progress.setValue(0)
         self._set_running(True)
-        self.worker = BuildDeployWorker(deploy_after, rooms or [], config)
+        self.worker = BuildDeployWorker(
+            deploy_after, rooms or [], config,
+            self._backend_repo_path(), self._web_repo_path(),
+        )
         self.worker.log.connect(self._append)
         self.worker.progress.connect(self._on_progress)
         self.worker.status.connect(self.statusBar().showMessage)
@@ -795,7 +965,16 @@ class MatrixWebDeployerWindow(QMainWindow):
 def run():
     import sys
 
+    # High-DPI: render consistently across monitors with different scale
+    # factors. Must be set before QApplication is constructed.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     window = MatrixWebDeployerWindow()
     window.show()
     sys.exit(app.exec_())
