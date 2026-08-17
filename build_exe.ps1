@@ -37,6 +37,7 @@ python -m PyInstaller `
     --hidden-import nacl `
     --hidden-import nacl.bindings `
     --collect-all paramiko `
+    --collect-all PyQt5 `
     "$PSScriptRoot\upgrade_or_gui.py"
 
 $ExePath = "$DistDir\$ExeName"

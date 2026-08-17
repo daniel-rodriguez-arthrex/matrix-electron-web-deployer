@@ -15,7 +15,7 @@ copy .env.example .env
 **Build from Source requires the internal `matrix-api-linux` and `matrix-app-linux` repositories** cloned as siblings under `../repos/`. Those are separate, access-restricted repositories and are not included here, so the tool is not usable end-to-end without them.
 
 ## Requirements
-- Python 3.8+ and packages from `requirements.txt` (`paramiko`)
+- Python 3.8+ and packages from `requirements.txt` (`paramiko`, `PyQt5`)
 - Node.js / npm and Git (for the build step)
 - Source repos at `../repos/matrix-api-linux` and `../repos/matrix-app-linux`
 - Network access to your OR router (`ROUTER_IP` in `.env`)
@@ -39,14 +39,11 @@ SUDO_PASSWORD=<your-sudo-password>
 python upgrade_or_gui.py
 ```
 
-Straight-to-the-point, two tabs:
+A PyQt5 app that shares its look with the Matrix Deploy tool. Three tabs:
 
-- **Deploy** — a single top-to-bottom flow:
-  1. Confirm the **Connection** fields (prefilled from `.env`).
-  2. Tick the **Target ORs** (Select All / None available).
-  3. Click **Build & Deploy**. It builds backend + web from source, runs a version-compatibility check, then deploys to every selected OR and restarts the `matrix-api` service — all streamed to the Log.
-  - **Build Only** is available to validate that the source compiles without deploying.
-- **FAQ** — quick answers to common workflow questions and troubleshooting.
+- **Deploy** — tick the **Target ORs** (Select All / Clear All), then click **Build & Deploy**. It builds backend + web from source, runs a version-compatibility check, deploys to every selected OR, and restarts the `matrix-api` service — all streamed to the live console. **Build Only** validates the source compiles without deploying; **Cancel** stops after the current step/room.
+- **Settings** — connection fields (Router IP, SSH user/password, sudo password), prefilled from `.env` with show/hide toggles and a **Reload from .env** button.
+- **FAQ** — searchable answers to common workflow questions and troubleshooting.
 
 ## CLI
 
