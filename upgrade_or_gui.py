@@ -288,11 +288,12 @@ class BuildDeployWorker(QThread):
     done = pyqtSignal(bool)             # overall success
 
     def __init__(self, deploy_after: bool, rooms: List[int], config: Optional[RuntimeConfig],
-                 backend_repo: Path, web_app_dir: Path):
+                 backend_repo: Path, web_app_dir: Path, skip_build: bool = False):
         super().__init__()
         self.deploy_after = deploy_after
         self.rooms = rooms
         self.config = config
+        self.skip_build = skip_build
         self._cancel = False
 
         self.backend_repo = Path(backend_repo)
@@ -319,10 +320,22 @@ class BuildDeployWorker(QThread):
 
     def run(self):
         try:
-            self.status.emit("Building from source...")
-            if not self._run_build():
-                self.done.emit(False)
-                return
+            if self.skip_build:
+                self._emit("=== Skipping build (using existing dist) ===", "info")
+                if not self.backend_dist.exists() or not self.web_dist.exists():
+                    self._emit(
+                        "ERROR: No existing build found. Run 'Build && Deploy' or "
+                        "'Build Only' first.", "error",
+                    )
+                    self.done.emit(False)
+                    return
+                self._emit(f"Backend dist: {self.backend_dist}", "detail")
+                self._emit(f"Web assets: {self.web_dist}", "detail")
+            else:
+                self.status.emit("Building from source...")
+                if not self._run_build():
+                    self.done.emit(False)
+                    return
             if self._cancel:
                 self._emit("Cancelled before deployment.", "warning")
                 self.done.emit(False)
@@ -462,10 +475,13 @@ class MatrixWebDeployerWindow(QMainWindow):
         root.setContentsMargins(10, 10, 10, 8)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_deploy_tab(), "Deploy")
-        self.tabs.addTab(self._build_settings_tab(), "Settings")
+        deploy_tab = self._build_deploy_tab()
+        self.settings_tab = self._build_settings_tab()
+        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.addTab(deploy_tab, "Deploy")
         self.tabs.addTab(self._build_faq_tab(), "FAQ")
         root.addWidget(self.tabs)
+        self.tabs.setCurrentWidget(deploy_tab)
         self.statusBar().showMessage("Ready")
 
     def _build_deploy_tab(self) -> QWidget:
@@ -549,29 +565,79 @@ class MatrixWebDeployerWindow(QMainWindow):
         return group
 
     def _build_action_row(self) -> QHBoxLayout:
+        """Action buttons with a one-line caption under each so a new user
+        immediately knows what each does. 'Build & Deploy' is the dominant
+        primary/recommended action."""
         row = QHBoxLayout()
+        row.setSpacing(10)
+
         self.deploy_btn = self._make_button("Build && Deploy", "primary")
         self.deploy_btn.setStyleSheet(
-            _button_style(BTN_COLORS["primary"]) + "QPushButton { font-size:15px; padding:11px; }"
+            _button_style(BTN_COLORS["primary"]) + "QPushButton { font-size:16px; font-weight:700; padding:13px; }"
         )
         self.deploy_btn.clicked.connect(self._build_and_deploy)
-        row.addWidget(self.deploy_btn, stretch=3)
+        row.addLayout(
+            self._action_column(
+                self.deploy_btn,
+                "Recommended \u2014 builds fresh from source, then deploys to the selected ORs.",
+            ),
+            stretch=3,
+        )
 
         self.build_btn = self._make_button("Build Only", "info")
         self.build_btn.setStyleSheet(
-            _button_style(BTN_COLORS["info"]) + "QPushButton { font-size:14px; padding:11px; }"
+            _button_style(BTN_COLORS["info"]) + "QPushButton { font-size:14px; padding:13px; }"
         )
         self.build_btn.clicked.connect(self._build_only)
-        row.addWidget(self.build_btn, stretch=1)
+        row.addLayout(
+            self._action_column(
+                self.build_btn,
+                "Compiles the code only \u2014 no deploy. Use to check the build succeeds.",
+            ),
+            stretch=2,
+        )
+
+        self.deploy_only_btn = self._make_button("Deploy Only", "service")
+        self.deploy_only_btn.setStyleSheet(
+            _button_style(BTN_COLORS["service"]) + "QPushButton { font-size:14px; padding:13px; }"
+        )
+        self.deploy_only_btn.setToolTip(
+            "Deploy the existing build output without rebuilding. Requires a "
+            "successful 'Build Only' or 'Build && Deploy' run first."
+        )
+        self.deploy_only_btn.clicked.connect(self._deploy_only)
+        row.addLayout(
+            self._action_column(
+                self.deploy_only_btn,
+                "Deploys the last build \u2014 skips rebuilding. Run Build Only first.",
+            ),
+            stretch=2,
+        )
 
         self.cancel_btn = self._make_button("Cancel", "danger")
         self.cancel_btn.setStyleSheet(
-            _button_style(BTN_COLORS["danger"]) + "QPushButton { font-size:14px; padding:11px; }"
+            _button_style(BTN_COLORS["danger"]) + "QPushButton { font-size:14px; padding:13px; }"
         )
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel)
-        row.addWidget(self.cancel_btn, stretch=1)
+        row.addLayout(
+            self._action_column(self.cancel_btn, "Stops the current run."),
+            stretch=1,
+        )
         return row
+
+    @staticmethod
+    def _action_column(button: QPushButton, caption: str) -> QVBoxLayout:
+        col = QVBoxLayout()
+        col.setSpacing(3)
+        col.addWidget(button)
+        label = QLabel(caption)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        label.setStyleSheet("color:#607D8B; font-size:11px; border:none;")
+        label.setMinimumHeight(30)
+        col.addWidget(label)
+        return col
 
     def _build_settings_tab(self) -> QWidget:
         tab = QWidget()
@@ -733,7 +799,14 @@ class MatrixWebDeployerWindow(QMainWindow):
                  "<li>A version-compatibility check (warns on major-version mismatch).</li>"
                  "<li>Uploads dist + web assets to each OR over SSH and restarts the service.</li></ul>"),
                 ("What is 'Build Only'?",
-                 "Runs just the build steps so you can validate the source compiles without deploying."),
+                 "Runs just the build steps so you can validate the source compiles without deploying. "
+                 "Once it succeeds, use <b>Deploy Only (skip build)</b> to ship that same build "
+                 "without rebuilding."),
+                ("What is 'Deploy Only (skip build)'?",
+                 "Deploys the most recent build output (backend <code>dist/</code> and web "
+                 "<code>dist/arthrex-synergy-matrix/</code>) straight to the selected ORs, skipping "
+                 "<code>git pull</code>/<code>npm install</code>/<code>npm run build</code>. Requires a "
+                 "prior successful <b>Build Only</b> or <b>Build &amp; Deploy</b> run."),
                 ("Can I stop a run?",
                  "Yes - click <b>Cancel</b>. It stops after the current step/room finishes."),
             ]),
@@ -862,7 +935,7 @@ class MatrixWebDeployerWindow(QMainWindow):
         missing = self._missing_connection() + self._missing_repos()
         if not missing:
             return
-        self.tabs.setCurrentIndex(1)  # Settings
+        self.tabs.setCurrentWidget(self.settings_tab)
 
     def _require_ready(self, need_deploy: bool) -> bool:
         """Gate for build/deploy. Repo paths are always required (for the
@@ -873,7 +946,7 @@ class MatrixWebDeployerWindow(QMainWindow):
             missing = self._missing_connection() + missing
         if not missing:
             return True
-        self.tabs.setCurrentIndex(1)  # Settings
+        self.tabs.setCurrentWidget(self.settings_tab)
         self._refresh_config_status()
         QMessageBox.warning(
             self,
@@ -918,7 +991,28 @@ class MatrixWebDeployerWindow(QMainWindow):
             return
         self._start(deploy_after=True, rooms=rooms)
 
-    def _start(self, deploy_after: bool, rooms: Optional[List[int]] = None):
+    def _deploy_only(self):
+        """Deploy the existing build output without rebuilding."""
+        rooms = self._selected_rooms()
+        if not rooms:
+            self._append("No ORs selected. Tick at least one OR on the Deploy tab.", "error")
+            QMessageBox.warning(self, "No ORs Selected",
+                                "Tick at least one OR on the Deploy tab.")
+            return
+        if not self._require_ready(need_deploy=True):
+            return
+        backend_dist = self._backend_repo_path() / "dist"
+        web_dist = self._web_repo_path() / "dist" / "arthrex-synergy-matrix"
+        if not backend_dist.exists() or not web_dist.exists():
+            QMessageBox.warning(
+                self, "No Build Found",
+                "No existing build output was found. Run 'Build Only' or "
+                "'Build && Deploy' first.",
+            )
+            return
+        self._start(deploy_after=True, rooms=rooms, skip_build=True)
+
+    def _start(self, deploy_after: bool, rooms: Optional[List[int]] = None, skip_build: bool = False):
         if self.worker and self.worker.isRunning():
             return
         config = RuntimeConfig(
@@ -932,6 +1026,7 @@ class MatrixWebDeployerWindow(QMainWindow):
         self.worker = BuildDeployWorker(
             deploy_after, rooms or [], config,
             self._backend_repo_path(), self._web_repo_path(),
+            skip_build=skip_build,
         )
         self.worker.log.connect(self._append)
         self.worker.progress.connect(self._on_progress)
@@ -959,6 +1054,7 @@ class MatrixWebDeployerWindow(QMainWindow):
     def _set_running(self, running: bool):
         self.deploy_btn.setEnabled(not running)
         self.build_btn.setEnabled(not running)
+        self.deploy_only_btn.setEnabled(not running)
         self.cancel_btn.setEnabled(running)
 
 
