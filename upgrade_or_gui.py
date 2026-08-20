@@ -12,6 +12,8 @@ Single workflow: set connection in Settings, pick ORs on Deploy, hit
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -268,13 +270,55 @@ def _classify(message: str) -> str:
     return "detail"
 
 
-NPM_CANDIDATES = ["C:\\nvm4w\\nodejs\\npm.cmd", "npm"]
+def _npm_fallback_dirs() -> List[Path]:
+    """Common Node.js install locations to check when npm isn't resolvable
+    via PATH (e.g. the GUI process inherited a stale environment)."""
+    dirs = [Path("C:\\nvm4w\\nodejs")]
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "APPDATA", "LOCALAPPDATA"):
+        base = os.environ.get(env_var)
+        if not base:
+            continue
+        dirs.append(Path(base) / "nodejs")
+        dirs.append(Path(base) / "npm")
+        dirs.append(Path(base) / "Programs" / "nodejs")
+    for env_var in ("NVM_SYMLINK", "NVM_HOME"):
+        base = os.environ.get(env_var)
+        if base:
+            dirs.append(Path(base))
+    return dirs
+
+
+_NPM_PATH_CACHE: Optional[str] = None
 
 
 def _npm() -> str:
-    for candidate in NPM_CANDIDATES:
-        if candidate == "npm" or Path(candidate).exists():
-            return candidate
+    """Resolve a launchable npm command on Windows.
+
+    ``npm`` on PATH is normally a ``.cmd`` shim, not an ``.exe``. Python's
+    subprocess (without shell=True) can only launch it if given the exact
+    path *with* the ``.cmd`` extension - a bare ``"npm"`` (or the wrong
+    extension order on some nvm installs) fails with
+    ``OSError: [WinError 193] %1 is not a valid Win32 application`` or
+    ``FileNotFoundError``. Always prefer ``npm.cmd`` over the extensionless
+    shim.
+    """
+    global _NPM_PATH_CACHE
+    if _NPM_PATH_CACHE:
+        return _NPM_PATH_CACHE
+
+    for name in ("npm.cmd", "npm.exe", "npm"):
+        found = shutil.which(name)
+        if found:
+            _NPM_PATH_CACHE = found
+            return found
+
+    for directory in _npm_fallback_dirs():
+        for name in ("npm.cmd", "npm.exe"):
+            candidate = directory / name
+            if candidate.exists():
+                _NPM_PATH_CACHE = str(candidate)
+                return _NPM_PATH_CACHE
+
     return "npm"
 
 
@@ -383,9 +427,10 @@ class BuildDeployWorker(QThread):
         npm = _npm()
         try:
             subprocess.run([npm, "--version"], capture_output=True, check=True, timeout=10)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            self._emit("ERROR: npm is not installed or not in PATH.", "error")
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+            self._emit(f"ERROR: npm is not installed or not in PATH. Tried: {npm} ({exc})", "error")
             return False
+        self._emit(f"[{label}] Using npm: {npm}", "detail")
 
         if check_file and not (repo / check_file).exists():
             self._emit(f"ERROR: {check_file} not found in {repo}", "error")
@@ -818,7 +863,8 @@ class MatrixWebDeployerWindow(QMainWindow):
                  "The console shows everything live. CLI runs also write to <code>work/&lt;run_id&gt;/logs/run.log</code>."),
                 ("Common errors",
                  "<ul><li><b>git pull failed</b>: commit/stash local changes in the repo, then retry.</li>"
-                 "<li><b>npm is not installed</b>: install Node.js or fix your PATH.</li>"
+                 "<li><b>npm is not installed</b>: the tool auto-detects npm (checking PATH and "
+                 "common Node.js install locations); install Node.js if none is found.</li>"
                  "<li><b>SSH/sudo auth failed</b>: check the Settings credentials / .env.</li>"
                  "<li><b>repo not found</b>: clone the source repos under <code>../repos/</code>.</li></ul>"),
             ]),
